@@ -3,8 +3,8 @@ import numpy as np
 import os
 import sys
 import tensorflow as tf
-
 from sklearn.model_selection import train_test_split
+from tensorflow.keras import layers, models
 
 EPOCHS = 10
 IMG_WIDTH = 30
@@ -12,9 +12,7 @@ IMG_HEIGHT = 30
 NUM_CATEGORIES = 43
 TEST_SIZE = 0.4
 
-
 def main():
-
     # Check command-line arguments
     if len(sys.argv) not in [2, 3]:
         sys.exit("Usage: python traffic.py data_directory [model.h5]")
@@ -35,18 +33,20 @@ def main():
     model.fit(x_train, y_train, epochs=EPOCHS)
 
     # Evaluate neural network performance
-    model.evaluate(x_test,  y_test, verbose=2)
+    model.evaluate(x_test, y_test, verbose=2)
 
     # Save model to file
     if len(sys.argv) == 3:
         filename = sys.argv[2]
-        model.save(filename)
-        print(f"Model saved to {filename}.")
-
+    else:
+        filename = "traffic_model.h5"  # Default filename if not provided
+    
+    model.save(filename)
+    print(f"Model saved to {filename}")
 
 def load_data(data_dir):
     """
-    Load image data from directory `data_dir`.
+    Load image data from directory data_dir.
     """
     images = []
     labels = []
@@ -123,5 +123,6 @@ def get_model():
     )
     
     return model
+
 if __name__ == "__main__":
     main()
