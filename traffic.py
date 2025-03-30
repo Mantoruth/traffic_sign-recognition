@@ -5,6 +5,7 @@ import sys
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 EPOCHS = 10
 IMG_WIDTH = 30
@@ -29,99 +30,121 @@ def main():
     # Get a compiled neural network
     model = get_model()
 
-    # Fit model on training data
-    model.fit(x_train, y_train, epochs=EPOCHS)
+    # Data augmentation
+    datagen = ImageDataGenerator(
+        rotation_range=15,
+        width_shift_range=0.1,
+        height_shift_range=0.1,
+        zoom_range=0.2,
+        shear_range=0.1,
+        brightness_range=[0.8,1.2],
+        fill_mode='nearest',
+        horizontal_flip=False
+    )
+
+    # Callbacks
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
+        tf.keras.callbacks.ModelCheckpoint('best_model.h5', save_best_only=True)
+    ]
+
+    # Fit model
+    model.fit(
+        datagen.flow(x_train, y_train),
+        validation_data=(x_test, y_test),
+        epochs=30,
+        callbacks=callbacks
+    )
 
     # Evaluate neural network performance
-    model.evaluate(x_test, y_test, verbose=2)
+    model.evaluate(x_test, y_test, verbose=2)  # <- This line was misaligned
 
     # Save model to file
     if len(sys.argv) == 3:
         filename = sys.argv[2]
     else:
-        filename = "traffic_model.h5"  # Default filename if not provided
+        filename = "best_model.h5"
     
     model.save(filename)
     print(f"Model saved to {filename}")
 
 def load_data(data_dir):
-    """
-    Load image data from directory data_dir.
-    """
     images = []
     labels = []
+    print(f"\nLoading data from: {os.path.abspath(data_dir)}")
     
-    # Loop through each category folder
     for category in range(NUM_CATEGORIES):
         category_dir = os.path.join(data_dir, str(category))
-        
-        # Check if directory exists
         if not os.path.isdir(category_dir):
+            print(f"⚠️ Missing category folder: {category}")
             continue
             
-        # Loop through each image in the category folder
-        for image_file in os.listdir(category_dir):
+        image_files = [f for f in os.listdir(category_dir) 
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.ppm'))]
+        
+        print(f"Category {category}: Found {len(image_files)} images")
+        
+        for image_file in image_files:
             image_path = os.path.join(category_dir, image_file)
-            
             try:
-                # Read and resize the image
-                image = cv2.imread(image_path)
-                if image is None:
-                    continue
+                img = cv2.imread(image_path)
+                if img is None:
+                    raise ValueError("Failed to read image")
                     
-                image = cv2.resize(image, (IMG_WIDTH, IMG_HEIGHT))
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+                img = cv2.resize(img, (IMG_WIDTH, IMG_HEIGHT))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = img.astype('float32') / 255.0
                 
-                # Normalize pixel values to [0, 1]
-                image = image / 255.0
-                
-                images.append(image)
+                images.append(img)
                 labels.append(category)
             except Exception as e:
-                print(f"Error processing {image_path}: {e}")
+                print(f"Error processing {image_path}: {str(e)}")
                 continue
-                
-    return (images, labels)
-
+    
+    print(f"\nTotal images loaded: {len(images)}")
+    if len(images) == 0:
+        raise ValueError("No images were loaded - check your data directory path")
+    
+    return np.array(images), np.array(labels)
 
 def get_model():
-    """
-    Returns a compiled convolutional neural network model.
-    """
     model = tf.keras.models.Sequential([
-        # Convolutional layers
-        tf.keras.layers.Conv2D(
-            32, (3, 3), activation="relu", input_shape=(IMG_WIDTH, IMG_HEIGHT, 3)
-        ),
-        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
+        # First Conv Block
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same', 
+                              input_shape=(IMG_WIDTH, IMG_HEIGHT, 3)),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Conv2D(64, (3,3), activation='relu', padding='same'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.MaxPooling2D(2,2),
+        tf.keras.layers.Dropout(0.2),
         
-        tf.keras.layers.Conv2D(64, (3, 3), activation="relu"),
-        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
-        
-        tf.keras.layers.Conv2D(128, (3, 3), activation="relu"),
-        tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
-        
-        # Flatten units
-        tf.keras.layers.Flatten(),
-        
-        # Hidden layers with dropout
-        tf.keras.layers.Dense(256, activation="relu"),
-        tf.keras.layers.Dropout(0.5),
-        
-        tf.keras.layers.Dense(128, activation="relu"),
+        # Second Conv Block
+        tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Conv2D(128, (3,3), activation='relu', padding='same'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.MaxPooling2D(2,2),
         tf.keras.layers.Dropout(0.3),
         
-        # Output layer
-        tf.keras.layers.Dense(NUM_CATEGORIES, activation="softmax")
+        # Third Conv Block
+        tf.keras.layers.Conv2D(256, (3,3), activation='relu', padding='same'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.MaxPooling2D(2,2),
+        tf.keras.layers.Dropout(0.4),
+        
+        # Dense Layers
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(512, activation='relu'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Dense(NUM_CATEGORIES, activation='softmax')
     ])
     
-    # Compile model
     model.compile(
-        optimizer="adam",
-        loss="categorical_crossentropy",
-        metrics=["accuracy"]
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
     )
-    
     return model
 
 if __name__ == "__main__":
