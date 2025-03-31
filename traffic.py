@@ -52,7 +52,7 @@ def main():
     model.fit(
         datagen.flow(x_train, y_train),
         validation_data=(x_test, y_test),
-        epochs=30,
+        epochs=10,
         callbacks=callbacks
     )
 
